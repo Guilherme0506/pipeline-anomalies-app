@@ -7,3 +7,4 @@ matplotlib
 matplotlib-venn
 streamlit-folium
 openpyxl
+requests
