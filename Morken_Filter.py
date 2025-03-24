@@ -61,8 +61,14 @@ with tab1:
     prio_max = int(df_morken["Prioridade Final"].max())
     selected_prio = st.sidebar.slider("Prioridade Final (Morken)", min_value=prio_min, max_value=prio_max, value=(prio_min, prio_max))
 
-    unique_types = df_anomalies["anom. type/ident"].dropna().unique()
-    selected_types = st.sidebar.multiselect("Tipos de Anomalia", options=sorted(unique_types), default=list(unique_types))
+    morken_status_filter = st.sidebar.multiselect(
+        "Status de Anomalias Morken",
+        options=["Matched", "Unmatched"],
+        default=["Matched", "Unmatched"]
+    )
+
+    rosen_types = df_anomalies["anom. type/ident"].dropna().unique()
+    selected_types = st.sidebar.multiselect("Tipos de Anomalia (Rosen)", options=sorted(rosen_types), default=list(rosen_types))
 
     # === Apply filters ===
     df_anomalies_filtered = df_anomalies[
@@ -70,11 +76,12 @@ with tab1:
         (df_anomalies["wl [%]"] <= selected_wl[1]) &
         (df_anomalies["anom. type/ident"].isin(selected_types))
     ]
+
     df_morken_filtered = df_morken[
         (df_morken["Prioridade Final"] >= selected_prio[0]) &
-        (df_morken["Prioridade Final"] <= selected_prio[1])
+        (df_morken["Prioridade Final"] <= selected_prio[1]) &
+        (df_morken["Match_Status"].isin(morken_status_filter))
     ]
-    
 
     # === Convert to GeoDataFrames ===
     gdf_anomalies = gpd.GeoDataFrame(df_anomalies_filtered.dropna(subset=["long", "lat"]),
@@ -93,7 +100,7 @@ with tab1:
         "Grinding": ["Anomaly  / Grinding"],
         "Lamination": ["Anomaly  / Lamination"],
         "Milling": ["Anomaly  / Milling"],
-        "Morken Matched": [],  # add placeholders
+        "Morken Matched": [],
         "Morken Unmatched": []
     }
 
@@ -103,20 +110,21 @@ with tab1:
         "Girth Weld Anomaly": "green",
         "Grinding": "blue",
         "Lamination": "purple",
-        "Milling": "brown"
-        }
-
-    # ✅ Now you can safely update it:
-    anomaly_colors.update({
+        "Milling": "brown",
         "Morken Matched": "yellow",
         "Morken Unmatched": "magenta"
-    })
+    }
 
 
 
     # === Create Map ===
     m = folium.Map(location=[-20, -45], zoom_start=6)
-    fgs = {k: FeatureGroup(name=k).add_to(m) for k in anomaly_groups}
+
+    # Create and add all anomaly groups as FeatureGroups
+    fgs = {}
+    for group_name in anomaly_groups.keys():
+        fgs[group_name] = folium.FeatureGroup(name=group_name, show=True)
+        fgs[group_name].add_to(m)
 
     # Load and add pipeline route
     kml_url = "https://raw.githubusercontent.com/Guilherme0506/pipeline-anomalies-app/main/Rota_Mineroduto.kml"
@@ -131,7 +139,7 @@ with tab1:
             tooltip="Pipeline Route"
         ).add_to(m)
 
-    # Plot Rosen Anomalies
+    # Plot Rosen anomalies
     for _, row in gdf_anomalies.iterrows():
         for group, types in anomaly_groups.items():
             if row["anom. type/ident"] in types:
@@ -140,10 +148,12 @@ with tab1:
                     radius=5,
                     color=anomaly_colors[group],
                     fill=True,
-                    fill_opacity=0.7
+                    fill_opacity=0.7,
+                    popup=f"Rosen - {row['anom. type/ident']}<br>WL: {row['wl [%]']}%"
                 ).add_to(fgs[group])
                 break
 
+    # Plot Morken anomalies
     for _, row in gdf_morken.iterrows():
         status = "Morken Matched" if row["Match_Status"] == "Matched" else "Morken Unmatched"
         folium.CircleMarker(
@@ -155,10 +165,10 @@ with tab1:
             popup=f"Morken - {row['Match_Status']}<br>Prioridade: {row['Prioridade Final']}"
         ).add_to(fgs[status])
 
+    # Add legend toggle
     folium.LayerControl(collapsed=False).add_to(m)
 
-
-    # Auto-zoom
+    # Auto-zoom to bounds
     if not gdf_anomalies.empty:
         bounds = gdf_anomalies.total_bounds
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
@@ -166,8 +176,9 @@ with tab1:
         bounds = gdf_morken.total_bounds
         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
 
-    # Show map only
+    # Show the map in Streamlit
     st_folium(m, width=1000, height=600)
+
 
 
 with tab2:
