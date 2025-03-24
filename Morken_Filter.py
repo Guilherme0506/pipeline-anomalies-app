@@ -8,6 +8,8 @@ from pyproj import Transformer
 from streamlit_folium import st_folium
 import matplotlib.pyplot as plt
 from matplotlib_venn import venn2
+import requests
+import xml.etree.ElementTree as ET
 
 # === Load Data ===
 @st.cache_data
@@ -23,7 +25,25 @@ df_morken, df_anomalies = load_data()
 # === VENN PLOT TAB ===
 tab1, tab2 = st.tabs(["📍 Mapa Interativo", "📊 Diagrama de Venn"])
 
+
+
 with tab1:
+    @st.cache_data
+    def load_kml_route(url):
+        response = requests.get(url)
+        kml_content = response.text
+
+        namespace = {'kml': 'http://www.opengis.net/kml/2.2'}
+        root = ET.fromstring(kml_content)
+
+        for placemark in root.findall(".//kml:Placemark", namespace):
+            line_string = placemark.find(".//kml:LineString", namespace)
+            if line_string is not None:
+                coordinates = line_string.find(".//kml:coordinates", namespace).text.strip()
+                coord_list = [(float(coord.split(',')[1]), float(coord.split(',')[0])) for coord in coordinates.split()]
+                return coord_list
+        return []
+
     # === Coordinate Transformation ===
     transformer = Transformer.from_crs("EPSG:31983", "EPSG:4326", always_xy=True)
     df_morken["long"], df_morken["lat"] = zip(*df_morken.apply(
@@ -54,6 +74,7 @@ with tab1:
         (df_morken["Prioridade Final"] >= selected_prio[0]) &
         (df_morken["Prioridade Final"] <= selected_prio[1])
     ]
+    
 
     # === Convert to GeoDataFrames ===
     gdf_anomalies = gpd.GeoDataFrame(df_anomalies_filtered.dropna(subset=["long", "lat"]),
@@ -71,18 +92,44 @@ with tab1:
         "Girth Weld Anomaly": ["Anomaly  / Girth weld anomaly"],
         "Grinding": ["Anomaly  / Grinding"],
         "Lamination": ["Anomaly  / Lamination"],
-        "Milling": ["Anomaly  / Milling"]
+        "Milling": ["Anomaly  / Milling"],
+        "Morken Matched": [],  # add placeholders
+        "Morken Unmatched": []
     }
+
     anomaly_colors = {
-        "Corrosion": "red", "Dent": "orange", "Girth Weld Anomaly": "green",
-        "Grinding": "blue", "Lamination": "purple", "Milling": "brown"
-    }
+        "Corrosion": "red",
+        "Dent": "orange",
+        "Girth Weld Anomaly": "green",
+        "Grinding": "blue",
+        "Lamination": "purple",
+        "Milling": "brown"
+        }
+
+    # ✅ Now you can safely update it:
+    anomaly_colors.update({
+        "Morken Matched": "yellow",
+        "Morken Unmatched": "magenta"
+    })
+
+
 
     # === Create Map ===
     m = folium.Map(location=[-20, -45], zoom_start=6)
     fgs = {k: FeatureGroup(name=k).add_to(m) for k in anomaly_groups}
-    fg_matched = FeatureGroup(name="Morken Matched", show=True).add_to(m)
-    fg_unmatched = FeatureGroup(name="Morken Unmatched", show=True).add_to(m)
+
+    # Load and add pipeline route
+    kml_url = "https://raw.githubusercontent.com/Guilherme0506/pipeline-anomalies-app/main/Rota_Mineroduto.kml"
+    pipeline_route = load_kml_route(kml_url)
+
+    if pipeline_route:
+        folium.PolyLine(
+            locations=pipeline_route,
+            color="blue",
+            weight=3,
+            opacity=0.7,
+            tooltip="Pipeline Route"
+        ).add_to(m)
 
     # Plot Rosen Anomalies
     for _, row in gdf_anomalies.iterrows():
@@ -97,17 +144,19 @@ with tab1:
                 ).add_to(fgs[group])
                 break
 
-    # Plot Morken Anomalies
     for _, row in gdf_morken.iterrows():
-        color = "yellow" if row["Match_Status"] == "Matched" else "magenta"
-        group = fg_matched if row["Match_Status"] == "Matched" else fg_unmatched
+        status = "Morken Matched" if row["Match_Status"] == "Matched" else "Morken Unmatched"
         folium.CircleMarker(
             location=[row["lat"], row["long"]],
             radius=6,
-            color=color,
+            color=anomaly_colors[status],
             fill=True,
-            fill_opacity=0.7
-        ).add_to(group)
+            fill_opacity=0.7,
+            popup=f"Morken - {row['Match_Status']}<br>Prioridade: {row['Prioridade Final']}"
+        ).add_to(fgs[status])
+
+    folium.LayerControl(collapsed=False).add_to(m)
+
 
     # Auto-zoom
     if not gdf_anomalies.empty:
