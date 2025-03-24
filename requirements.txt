@@ -1,0 +1,9 @@
+streamlit
+pandas
+geopandas
+folium
+pyproj
+matplotlib
+matplotlib-venn
+streamlit-folium
+openpyxl
