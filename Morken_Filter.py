@@ -65,15 +65,26 @@ with tab1:
     selected_types = st.sidebar.multiselect("Tipos de Anomalia", options=sorted(unique_types), default=list(unique_types))
 
     # === Apply filters ===
+    # Apply filters to Rosen anomalies (as before)
     df_anomalies_filtered = df_anomalies[
         (df_anomalies["wl [%]"] >= selected_wl[0]) &
         (df_anomalies["wl [%]"] <= selected_wl[1]) &
         (df_anomalies["anom. type/ident"].isin(selected_types))
     ]
+
+    # Apply filters to Morken as well (optional: based on anomaly status)
+    morken_status_filter = st.sidebar.multiselect(
+        "Status de Anomalias Morken", 
+        options=["Matched", "Unmatched"], 
+        default=["Matched", "Unmatched"]
+    )
+
     df_morken_filtered = df_morken[
         (df_morken["Prioridade Final"] >= selected_prio[0]) &
-        (df_morken["Prioridade Final"] <= selected_prio[1])
+        (df_morken["Prioridade Final"] <= selected_prio[1]) &
+        (df_morken["Match_Status"].isin(morken_status_filter))
     ]
+
     
 
     # === Convert to GeoDataFrames ===
